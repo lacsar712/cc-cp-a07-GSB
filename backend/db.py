@@ -23,6 +23,28 @@ CREATE TABLE IF NOT EXISTS probe_readings (
     processed_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS idx_probe_readings_status ON probe_readings (status, id);
+
+-- 每个自然日一行：quota_limit 为当日可交条数（NULL 表示未设限），used_count 为已成功入队条数
+CREATE TABLE IF NOT EXISTS daily_quota (
+    day date PRIMARY KEY,
+    quota_limit integer,
+    used_count integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (quota_limit IS NULL OR quota_limit >= 0),
+    CHECK (used_count >= 0)
+);
+
+-- 切日清零流水
+CREATE TABLE IF NOT EXISTS quota_ledger (
+    id serial PRIMARY KEY,
+    kind text NOT NULL DEFAULT 'reset',
+    day date NOT NULL,
+    prev_day date,
+    prev_used integer,
+    carried_limit integer,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_quota_ledger_day ON quota_ledger (day, id);
 """
 
 

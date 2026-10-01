@@ -134,3 +134,59 @@ td {
   font-size: 0.875rem;
   color: #475569;
 }
+
+.nav {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.35rem;
+}
+
+.nav a {
+  font-size: 0.9rem;
+  color: #64748b;
+  cursor: pointer;
+  text-decoration: none;
+  padding-bottom: 0.15rem;
+  border-bottom: 2px solid transparent;
+}
+
+.nav a.active {
+  color: #0369a1;
+  border-bottom-color: #0369a1;
+  font-weight: 600;
+}
+
+.stats {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.stat {
+  flex: 1 1 8rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  text-align: center;
+}
+
+.stat-num {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin-top: 0.15rem;
+}
+
+.quota-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
