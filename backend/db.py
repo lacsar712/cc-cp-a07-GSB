@@ -10,6 +10,10 @@ DSN = os.environ.get(
     "DATABASE_URL", "postgresql://app:app@localhost:54397/coldchain"
 )
 
+# 自然日按此时区切分；切日时已交条数自动清零并记流水。
+QUOTA_TZ = os.environ.get("QUOTA_TZ", "Asia/Shanghai")
+DEFAULT_DAILY_QUOTA = int(os.environ.get("DEFAULT_DAILY_QUOTA", "10"))
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS probe_readings (
     id serial PRIMARY KEY,
@@ -23,7 +27,33 @@ CREATE TABLE IF NOT EXISTS probe_readings (
     processed_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS idx_probe_readings_status ON probe_readings (status, id);
+
+CREATE TABLE IF NOT EXISTS quota_state (
+    id smallint PRIMARY KEY,
+    day date NOT NULL,
+    daily_quota integer NOT NULL,
+    used integer NOT NULL DEFAULT 0,
+    updated_by text,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS quota_ledger (
+    id serial PRIMARY KEY,
+    event text NOT NULL,
+    day date NOT NULL,
+    detail text NOT NULL,
+    actor text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_quota_ledger_id_desc ON quota_ledger (id DESC);
 """
+
+# 单行配额状态（id=1），不存在时播种；已存在则保留现值。
+QUOTA_SEED_SQL = """
+INSERT INTO quota_state (id, day, daily_quota, used, updated_by)
+VALUES (1, (now() AT TIME ZONE $1)::date, $2, 0, 'system')
+ON CONFLICT (id) DO NOTHING
+"""
+QUOTA_SEED_SQL_SYNC = QUOTA_SEED_SQL.replace("$1", "%s").replace("$2", "%s")
 
 
 def connect_sync():
@@ -32,6 +62,7 @@ def connect_sync():
 
 def ensure_schema_sync(conn) -> None:
     conn.execute(SCHEMA_SQL)
+    conn.execute(QUOTA_SEED_SQL_SYNC, (QUOTA_TZ, DEFAULT_DAILY_QUOTA))
 
 
 async def create_pool() -> asyncpg.Pool:
@@ -41,6 +72,7 @@ async def create_pool() -> asyncpg.Pool:
 async def ensure_schema_async(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         await conn.execute(SCHEMA_SQL)
+        await conn.execute(QUOTA_SEED_SQL, QUOTA_TZ, DEFAULT_DAILY_QUOTA)
 
 
 async def seed_if_empty(pool: asyncpg.Pool) -> None:

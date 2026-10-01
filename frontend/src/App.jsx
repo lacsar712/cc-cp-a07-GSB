@@ -17,6 +17,12 @@ function displayVerdict(row) {
   return "—";
 }
 
+function ledgerEventLabel(event) {
+  if (event === "reset") return "切日清零";
+  if (event === "set_quota") return "改配额";
+  return event;
+}
+
 export function App() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [user, setUser] = useState(() => {
@@ -29,6 +35,12 @@ export function App() {
   const [loginForm, setLoginForm] = useState({ username: "logger", password: "log123456" });
   const [submitForm, setSubmitForm] = useState({ probe_id: "", temp_c: "" });
   const [rows, setRows] = useState([]);
+  const [page, setPage] = useState("readings");
+  const [quota, setQuota] = useState(null);
+  const [ledger, setLedger] = useState([]);
+  const [quotaInput, setQuotaInput] = useState("");
+  const [quotaMsg, setQuotaMsg] = useState("");
+  const [quotaErr, setQuotaErr] = useState("");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,12 +61,30 @@ export function App() {
     setRows(await res.json());
   }, [token, authHeaders]);
 
+  const loadQuota = useCallback(async () => {
+    if (!token) return;
+    const res = await fetch("/api/quota", { headers: authHeaders() });
+    if (res.ok) setQuota(await res.json());
+  }, [token, authHeaders]);
+
+  const loadLedger = useCallback(async () => {
+    if (!token) return;
+    const res = await fetch("/api/quota/ledger", { headers: authHeaders() });
+    if (res.ok) setLedger(await res.json());
+  }, [token, authHeaders]);
+
   useEffect(() => {
     loadReadings();
+    loadQuota();
+    if (page === "quota") loadLedger();
     if (!token) return undefined;
-    const t = setInterval(loadReadings, 3000);
+    const t = setInterval(() => {
+      loadReadings();
+      loadQuota();
+      if (page === "quota") loadLedger();
+    }, 3000);
     return () => clearInterval(t);
-  }, [loadReadings, token]);
+  }, [loadReadings, loadQuota, loadLedger, token, page]);
 
   async function onLogin(e) {
     e.preventDefault();
@@ -89,6 +119,9 @@ export function App() {
     setToken(null);
     setUser(null);
     setRows([]);
+    setQuota(null);
+    setLedger([]);
+    setPage("readings");
   }
 
   async function onSubmit(e) {
@@ -108,11 +141,38 @@ export function App() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.detail || "提交失败");
+        await loadQuota();
         return;
       }
       setMsg(data.message || "已提交");
       setSubmitForm({ probe_id: "", temp_c: "" });
       await loadReadings();
+      await loadQuota();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onSaveQuota(e) {
+    e.preventDefault();
+    setQuotaErr("");
+    setQuotaMsg("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/quota", {
+        method: "PUT",
+        headers: authHeaders(),
+        body: JSON.stringify({ daily_quota: Number(quotaInput) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setQuotaErr(data.detail || "保存配额失败");
+        return;
+      }
+      setQuota(data);
+      setQuotaMsg(`已设本日可交 ${data.daily_quota} 条，只影响之后提交`);
+      setQuotaInput("");
+      await loadLedger();
     } finally {
       setLoading(false);
     }
@@ -152,7 +212,7 @@ export function App() {
             {error && <p class="err">{error}</p>}
           </form>
           <p class="sub" style={{ marginBottom: 0 }}>
-            记录员 logger / log123456 · 值班员 watcher / watch123456
+            记录员 logger / log123456 · logger2 / log123456 · 值班员 watcher / watch123456
           </p>
         </div>
       </div>
@@ -170,12 +230,99 @@ export function App() {
         </div>
         <div class="user">
           {user?.username}（{isWriter ? "记录员" : "值班员"}）
+          <button
+            type="button"
+            class="secondary"
+            style={{ marginLeft: "0.5rem" }}
+            onClick={() => setPage(page === "quota" ? "readings" : "quota")}
+          >
+            {page === "quota" ? "返回列表" : "条数配额"}
+          </button>
           <button type="button" class="secondary" style={{ marginLeft: "0.5rem" }} onClick={logout}>
             退出
           </button>
         </div>
       </div>
 
+      {page === "quota" ? (
+        <>
+          <div class="card">
+            <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>条数配额</h2>
+            {quota ? (
+              <>
+                <p class="sub" style={{ marginBottom: "0.75rem" }}>
+                  自然日 {quota.day}（{quota.tz}）· 今日已交{" "}
+                  <b>{quota.used}</b> 条 · 还剩 <b>{quota.remaining}</b> 条
+                </p>
+                {isWriter ? (
+                  <form onSubmit={onSaveQuota}>
+                    <div class="row">
+                      <label>
+                        本日可交条数
+                        <input
+                          required
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={quotaInput}
+                          onInput={(e) => setQuotaInput(e.target.value)}
+                          placeholder={`当前 ${quota.daily_quota} 条`}
+                        />
+                      </label>
+                      <button type="submit" disabled={loading}>
+                        保存配额
+                      </button>
+                    </div>
+                    <p class="sub" style={{ marginBottom: 0 }}>
+                      当前配额 {quota.daily_quota} 条；改配额只影响之后提交，今日已交不清零。
+                    </p>
+                    {quotaErr && <p class="err">{quotaErr}</p>}
+                    {quotaMsg && <p class="ok">{quotaMsg}</p>}
+                  </form>
+                ) : (
+                  <p class="sub" style={{ marginBottom: 0 }}>
+                    当前配额 {quota.daily_quota} 条。观察账号可翻已交与流水，不能改配额。
+                  </p>
+                )}
+              </>
+            ) : (
+              <p class="sub" style={{ marginBottom: 0 }}>加载中…</p>
+            )}
+          </div>
+
+          <div class="card">
+            <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>清零流水</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>事件</th>
+                  <th>自然日</th>
+                  <th>说明</th>
+                  <th>操作人</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledger.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</td>
+                    <td>{ledgerEventLabel(r.event)}</td>
+                    <td>{r.day}</td>
+                    <td>{r.detail}</td>
+                    <td>{r.actor}</td>
+                  </tr>
+                ))}
+                {ledger.length === 0 && (
+                  <tr>
+                    <td colspan="5">暂无流水</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <>
       {isWriter && (
         <div class="card">
           <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>提交读数</h2>
@@ -210,6 +357,11 @@ export function App() {
             </div>
             {error && <p class="err">{error}</p>}
             {msg && <p class="ok">{msg}</p>}
+            {quota && (
+              <p class="sub" style={{ marginBottom: 0 }}>
+                今日已交 {quota.used} 条 / 配额 {quota.daily_quota} 条，还剩 {quota.remaining} 条
+              </p>
+            )}
           </form>
         </div>
       )}
@@ -252,6 +404,8 @@ export function App() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
     </div>
   );
 }
